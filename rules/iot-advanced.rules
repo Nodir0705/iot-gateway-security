@@ -1,0 +1,74 @@
+# =============================================================================
+# Advanced IoT Protocol Detection Rules — v6 Stress Test
+# SID range: 1007001-1007050
+# Based on real-world IoT incident gap analysis (40+ cases)
+# Detects: MQTT abuse, cryptomining, DNS rebinding, UPnP exploitation,
+#          P2P/DHT botnet C2, HTTP cleartext credential exposure
+# =============================================================================
+
+# --- MQTT Protocol Abuse (49,000+ exposed brokers globally) ---
+
+# 1007001: MQTT CONNECT to internal broker (IoT devices shouldn't accept MQTT)
+# Matches MQTT packet type 0x10 (CONNECT) with protocol name "MQTT"
+alert tcp any any -> $HOME_NET 1883 (msg:"IOT-MQTT CONNECT to internal broker"; flow:to_server,established; content:"|10|"; depth:1; content:"MQTT"; within:20; classtype:policy-violation; sid:1007001; rev:1;)
+
+# 1007002: MQTT wildcard subscribe (# topic = subscribe to ALL messages)
+# Packet type 0x82 (SUBSCRIBE) with topic "#" (0x23)
+# No depth restriction — SUBSCRIBE may follow CONNECT in the same TCP stream
+alert tcp any any -> $HOME_NET 1883 (msg:"IOT-MQTT wildcard subscribe all topics"; flow:to_server,established; content:"|82|"; content:"|00 01 23|"; distance:2; within:20; classtype:policy-violation; sid:1007002; rev:1;)
+
+# --- Cryptomining Detection (MikroTik 200K+ router campaign) ---
+
+# 1007010: Stratum mining.subscribe (JSON-RPC mining pool handshake)
+alert tcp any any -> any any (msg:"IOT-CRYPTO Stratum mining.subscribe"; flow:to_server,established; content:"mining.subscribe"; classtype:policy-violation; sid:1007010; rev:1;)
+
+# 1007011: Stratum mining.authorize (worker authentication to pool)
+alert tcp any any -> any any (msg:"IOT-CRYPTO Stratum mining.authorize"; flow:to_server,established; content:"mining.authorize"; classtype:policy-violation; sid:1007011; rev:1;)
+
+# 1007012: CoinHive/web miner script request
+alert tcp any any -> any any (msg:"IOT-CRYPTO CoinHive miner script request"; flow:to_server,established; content:"coinhive.min.js"; classtype:policy-violation; sid:1007012; rev:1;)
+
+# --- DNS Rebinding Detection (Google Home, Sonos, cameras vulnerable) ---
+
+# 1007020: DNS response from external server containing private IP 192.168.x.x
+# Bytes 0xC0 0xA8 = 192.168 in DNS A record answer
+alert udp any 53 -> $HOME_NET any (msg:"IOT-DNS response with private IP 192.168.x.x (possible rebinding)"; content:"|c0 a8|"; classtype:bad-unknown; sid:1007020; rev:1;)
+
+# --- UPnP Exploitation (UPnProxy 45K routers, CallStranger CVE-2020-12695) ---
+
+# 1007030: UPnP SUBSCRIBE with external CALLBACK (SSRF / data exfiltration)
+alert tcp any any -> $HOME_NET any (msg:"IOT-UPNP SUBSCRIBE with external callback"; flow:to_server,established; content:"SUBSCRIBE"; depth:20; content:"CALLBACK"; distance:0; within:300; classtype:policy-violation; sid:1007030; rev:1;)
+
+# 1007031: UPnP AddPortMapping (NAT injection to expose internal services)
+alert tcp any any -> $HOME_NET any (msg:"IOT-UPNP AddPortMapping request"; flow:to_server,established; content:"AddPortMapping"; classtype:policy-violation; sid:1007031; rev:1;)
+
+# --- P2P/DHT Botnet Detection (Mozi 90% of IoT traffic, Hajime 300K devices) ---
+
+# 1007040: BitTorrent DHT message on non-standard port
+# Bencoded DHT signature: "d1:ad2:id20:" (dict with args containing 20-byte node ID)
+alert udp any any -> $HOME_NET !6881:6889 (msg:"IOT-P2P BitTorrent DHT on non-standard port"; content:"d1:"; depth:3; content:"1:q"; distance:0; within:80; classtype:policy-violation; sid:1007040; rev:1;)
+
+# --- HTTP Cleartext Credential Exposure (VPNFilter ssler module) ---
+
+# 1007050: HTTP Basic Auth over cleartext (no TLS)
+alert tcp any any -> $HOME_NET [80,5000,8080] (msg:"IOT-HTTP Basic auth over cleartext HTTP"; flow:to_server,established; content:"Authorization: Basic"; classtype:policy-violation; sid:1007050; rev:1;)
+
+# --- Firmware Download Detection (Netgear R7000 no-TLS, TP-Link unsigned updates) ---
+
+# 1008010: Firmware file download over unencrypted HTTP (.bin)
+alert tcp any any -> any any (msg:"IOT-FIRMWARE unencrypted firmware download (.bin)"; flow:to_server,established; content:".bin"; content:"GET"; depth:4; classtype:policy-violation; sid:1008010; rev:1;)
+
+# 1008011: Firmware file download over unencrypted HTTP (.img)
+alert tcp any any -> any any (msg:"IOT-FIRMWARE unencrypted firmware download (.img)"; flow:to_server,established; content:".img"; content:"GET"; depth:4; classtype:policy-violation; sid:1008011; rev:1;)
+
+# --- Lateral Movement Detection (post-compromise internal scanning) ---
+
+# 1008020: Internal-to-internal port scan from IoT device
+# IoT devices should not scan other internal hosts
+alert tcp $HOME_NET any -> $HOME_NET any (msg:"IOT-LATERAL internal host scan from IoT device"; flags:S; threshold: type both, track by_src, count 20, seconds 30; classtype:attempted-recon; sid:1008020; rev:1;)
+
+# --- Data Exfiltration Detection ---
+
+# 1008021: Large outbound data transfer from IoT device
+# IoT devices typically send small telemetry, not bulk data
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IOT-EXFIL large outbound transfer from IoT device"; flow:to_server,established; dsize:>10000; threshold: type both, track by_src, count 5, seconds 60; classtype:policy-violation; sid:1008021; rev:1;)

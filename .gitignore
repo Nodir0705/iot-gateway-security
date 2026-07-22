@@ -1,0 +1,34 @@
+# Runtime output — never commit (contains captured traffic; grows to GBs)
+logs/
+pids/
+*.jsonl
+*.pcap
+
+# Local secrets / environment
+gateway.env
+.env
+*.token
+
+# Editor / prior-revision backups (dashboard/app.py.bak2 held a plaintext password)
+*.bak
+*.bak2
+*.orig
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+env/
+venv/
+.venv/
+
+# Compiled native artifacts (rebuild via build_npu_infer.sh / build_ebpf.sh)
+scripts/libnpu_infer.so
+*.o
+*.bpf
+
+# Dated model backups
+models.bak_*/
+
+# OS
+.DS_Store

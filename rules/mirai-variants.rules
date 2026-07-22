@@ -1,0 +1,40 @@
+# Mirai Botnet Variants — Gafgyt, Mozi, Satori, Hajime, BrickerBot
+
+# Gafgyt / Bashlite
+alert tcp any any -> $HOME_NET any (msg:"MALWARE Gafgyt payload GAFGYT string"; flow:to_server,established; content:"/bin/busybox"; content:"GAFGYT"; distance:0; within:100; classtype:trojan-activity; sid:1001001; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"MALWARE Bashlite wget dropper"; flow:to_server,established; content:"wget"; content:"chmod 777"; distance:0; within:200; classtype:trojan-activity; sid:1001002; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"MALWARE Gafgyt PING command"; flow:to_server,established; content:"PING"; content:"PONG"; distance:0; within:20; classtype:trojan-activity; sid:1001003; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"MALWARE Gafgyt SCANNER ON command"; flow:to_server,established; content:"SCANNER ON"; classtype:trojan-activity; sid:1001004; rev:1;)
+
+# Mozi botnet
+alert udp any any -> any 6881 (msg:"MALWARE Mozi botnet DHT beacon"; content:"Mozi"; classtype:trojan-activity; sid:1001010; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"MALWARE Mozi.m payload drop"; flow:to_server,established; content:"Mozi.m"; classtype:trojan-activity; sid:1001011; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"MALWARE Mozi.a payload drop"; flow:to_server,established; content:"Mozi.a"; classtype:trojan-activity; sid:1001012; rev:1;)
+
+# Satori
+alert tcp any any -> $HOME_NET 37215 (msg:"EXPLOIT Satori Huawei HG532 RCE"; flow:to_server,established; content:"DeviceUpgrade"; classtype:attempted-admin; sid:1001020; rev:1;)
+alert tcp any any -> $HOME_NET 52869 (msg:"EXPLOIT Satori Realtek SDK UPnP RCE"; flow:to_server,established; content:"NewInternalClient"; classtype:attempted-admin; sid:1001021; rev:1;)
+
+# BrickerBot
+alert tcp any any -> $HOME_NET 22 (msg:"MALWARE BrickerBot SSH rapid brute"; flow:to_server; flags:S; threshold: type both, track by_src, count 20, seconds 5; classtype:attempted-admin; sid:1001030; rev:1;)
+
+# Generic IoT dropper patterns
+alert tcp any any -> $HOME_NET any (msg:"IOT Dropper chmod 777 in /tmp"; flow:to_server,established; content:"chmod"; content:"777"; within:20; content:"/tmp/"; distance:0; within:50; classtype:trojan-activity; sid:1001040; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"IOT wget to /tmp dropper"; flow:to_server,established; content:"wget"; content:"/tmp/"; distance:0; within:100; classtype:trojan-activity; sid:1001041; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"IOT curl to /tmp dropper"; flow:to_server,established; content:"curl"; content:"-o /tmp"; distance:0; within:50; classtype:trojan-activity; sid:1001042; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"IOT tftp dropper payload"; flow:to_server,established; content:"tftp"; content:"-g"; distance:0; within:20; classtype:trojan-activity; sid:1001043; rev:1;)
+
+# Mirai scanner pattern (outbound)
+alert tcp $HOME_NET any -> any [23,2323,7547,5555] (msg:"IOT Mirai-style outbound scan"; flow:to_server; flags:S; threshold: type both, track by_src, count 30, seconds 5; classtype:attempted-recon; sid:1001050; rev:1;)
+alert tcp any any -> $HOME_NET 7547 (msg:"IOT TR-069 inbound exploit attempt"; flow:to_server; flags:S; threshold: type both, track by_src, count 5, seconds 60; classtype:attempted-admin; sid:1001051; rev:1;)
+
+# Common C2 ports outbound
+alert tcp $HOME_NET any -> any [1337,4444,5555,6666,7777,8888,9999,31337] (msg:"IOT Outbound common C2 port"; flow:to_server,established; classtype:trojan-activity; sid:1001060; rev:2;)
+
+# IRC C2 (classic botnet)
+alert tcp $HOME_NET any -> $EXTERNAL_NET [6660,6661,6662,6663,6664,6665,6666,6667,6668,6669] (msg:"IOT Outbound IRC C2 port"; flow:to_server; flags:S; classtype:trojan-activity; sid:1001070; rev:1;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IOT IRC NICK+USER outbound"; flow:to_server,established; content:"NICK "; content:"USER "; distance:0; within:100; classtype:trojan-activity; sid:1001071; rev:1;)
+
+# Reverse shell patterns
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IOT Reverse shell /bin/sh outbound"; flow:established; content:"/bin/sh"; classtype:trojan-activity; sid:1001080; rev:1;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IOT Reverse bash -i outbound"; flow:established; content:"bash -i"; classtype:trojan-activity; sid:1001081; rev:1;)

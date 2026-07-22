@@ -1,0 +1,13 @@
+[Unit]
+Description=IoT Security Gateway
+After=network.target mosquitto.service influxdb.service grafana-server.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+ExecStart=/home/orangepi/iot-gateway/gateway.sh start
+ExecStop=/home/orangepi/iot-gateway/gateway.sh stop
+
+[Install]
+WantedBy=multi-user.target

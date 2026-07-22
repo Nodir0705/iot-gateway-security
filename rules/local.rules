@@ -1,0 +1,2 @@
+# Local rules — keep empty for stress testing
+# DO NOT add eBPF bypass pass rules here — they prevent alert rules from firing

@@ -1,0 +1,22 @@
+# ── Runtime (gateway + dashboard + pipeline) ──────────────────────────────
+flask
+psutil
+numpy
+scapy
+paho-mqtt
+requests
+joblib
+scikit-learn          # CPU fallback detector (rf_model.joblib)
+
+# ── Optional ──────────────────────────────────────────────────────────────
+influxdb-client        # only if using metrics_exporter.py → InfluxDB
+onnxruntime            # CPU inference fallback when the NPU/RKNN path is unavailable
+
+# ── Training only (not needed to run the gateway) ─────────────────────────
+# torch                # scripts/train_autoencoder.py
+# onnx                 # ONNX export
+# pandas               # dataset handling
+
+# ── NPU inference (NOT on PyPI — install the vendor wheel on the device) ──
+# rknn-toolkit-lite2   # from https://github.com/airockchip/rknn-toolkit2
+#                      # (rknn_toolkit_lite2/packages/*aarch64*.whl). Device-only.

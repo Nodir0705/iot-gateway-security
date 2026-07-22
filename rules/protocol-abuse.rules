@@ -1,0 +1,42 @@
+# Protocol Abuse — MQTT, CoAP, RTSP, ONVIF, SNMP, HTTP default creds
+
+# MQTT attacks
+alert tcp any any -> $HOME_NET 1883 (msg:"IOT MQTT connect flood"; flow:to_server,established; content:"|10|"; depth:1; threshold: type both, track by_src, count 20, seconds 60; classtype:attempted-dos; sid:1003001; rev:1;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET 1883 (msg:"IOT Outbound MQTT to external broker"; flow:to_server,established; classtype:policy-violation; sid:1003002; rev:1;)
+alert tcp any any -> $HOME_NET 1883 (msg:"IOT MQTT large payload anomaly"; flow:to_server,established; dsize:>10000; classtype:policy-violation; sid:1003003; rev:1;)
+alert tcp any any -> $HOME_NET 1883 (msg:"IOT MQTT broker brute force"; flow:to_server; flags:S; threshold: type both, track by_src, count 15, seconds 30; classtype:attempted-admin; sid:1003004; rev:1;)
+
+# CoAP
+alert udp any any -> $HOME_NET 5683 (msg:"IOT CoAP request flood"; threshold: type both, track by_src, count 100, seconds 10; classtype:attempted-dos; sid:1003010; rev:1;)
+alert udp any any -> $HOME_NET 5683 (msg:"IOT CoAP DELETE method"; content:"|44|"; depth:1; classtype:attempted-admin; sid:1003011; rev:1;)
+alert udp any any -> $HOME_NET 5684 (msg:"IOT CoAP DTLS flood"; threshold: type both, track by_src, count 50, seconds 10; classtype:attempted-dos; sid:1003012; rev:1;)
+
+# RTSP (IP cameras)
+alert tcp any any -> $HOME_NET 554 (msg:"IOT RTSP brute force attempt"; flow:to_server,established; content:"RTSP/1.0"; threshold: type both, track by_src, count 10, seconds 60; classtype:attempted-admin; sid:1003020; rev:1;)
+alert tcp any any -> $HOME_NET 554 (msg:"IOT RTSP Basic Auth attempt"; flow:to_server,established; content:"Authorization: Basic"; classtype:attempted-admin; sid:1003021; rev:1;)
+alert tcp any any -> $HOME_NET [554,8554] (msg:"IOT RTSP DESCRIBE scan"; flow:to_server,established; content:"DESCRIBE rtsp://"; classtype:attempted-recon; sid:1003022; rev:1;)
+
+# WS-Discovery DDoS amplification
+alert udp any any -> 239.255.255.250 3702 (msg:"IOT WS-Discovery flood"; content:"discovery"; nocase; threshold: type both, track by_src, count 20, seconds 10; classtype:attempted-dos; sid:1003030; rev:1;)
+
+# mDNS flood
+alert udp any any -> 224.0.0.251 5353 (msg:"IOT mDNS flood"; threshold: type both, track by_src, count 50, seconds 10; classtype:attempted-dos; sid:1003040; rev:1;)
+
+# ONVIF probe/abuse
+alert tcp any any -> $HOME_NET [80,5000,8080] (msg:"IOT ONVIF GetSystemDateAndTime probe"; flow:to_server,established; content:"GetSystemDateAndTime"; classtype:attempted-recon; sid:1003050; rev:1;)
+alert tcp any any -> $HOME_NET [80,5000,8080] (msg:"IOT ONVIF SetUser account modification"; flow:to_server,established; content:"SetUser"; classtype:attempted-admin; sid:1003051; rev:1;)
+alert tcp any any -> $HOME_NET [80,5000,8080] (msg:"IOT ONVIF CreateUsers request"; flow:to_server,established; content:"CreateUsers"; classtype:attempted-admin; sid:1003052; rev:1;)
+
+# SNMP default community strings
+alert udp any any -> $HOME_NET 161 (msg:"IOT SNMP public community string"; content:"public"; classtype:attempted-recon; sid:1003060; rev:1;)
+alert udp any any -> $HOME_NET 161 (msg:"IOT SNMP private community string"; content:"private"; classtype:attempted-recon; sid:1003061; rev:1;)
+
+# HTTP default credentials (Base64 encoded)
+alert tcp any any -> $HOME_NET any (msg:"IOT HTTP Basic Auth admin:admin"; flow:to_server,established; content:"Authorization: Basic YWRtaW46YWRtaW4="; classtype:attempted-admin; sid:1003070; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"IOT HTTP Basic Auth admin:password"; flow:to_server,established; content:"Authorization: Basic YWRtaW46cGFzc3dvcmQ="; classtype:attempted-admin; sid:1003071; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"IOT HTTP Basic Auth root:root"; flow:to_server,established; content:"Authorization: Basic cm9vdDpyb290"; classtype:attempted-admin; sid:1003072; rev:1;)
+alert tcp any any -> $HOME_NET any (msg:"IOT HTTP Basic Auth root:admin"; flow:to_server,established; content:"Authorization: Basic cm9vdDphZG1pbg=="; classtype:attempted-admin; sid:1003073; rev:1;)
+
+# Telnet default passwords
+alert tcp any any -> $HOME_NET [23,2323] (msg:"IOT Telnet default xc3511 password"; flow:to_server,established; content:"xc3511"; classtype:attempted-admin; sid:1003080; rev:1;)
+alert tcp any any -> $HOME_NET [23,2323] (msg:"IOT Telnet default 7ujMko0vizxv"; flow:to_server,established; content:"7ujMko0vizxv"; classtype:attempted-admin; sid:1003081; rev:1;)

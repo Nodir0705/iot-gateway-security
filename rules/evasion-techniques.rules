@@ -1,0 +1,51 @@
+# =============================================================================
+# Evasion Techniques Detection Rules — v4 Stress Test
+# SID range: 1005001-1005040
+# Detects: IP fragmentation, TTL anomalies, TCP flag anomalies, spoofed sources
+# =============================================================================
+
+# --- IP Fragmentation Anomalies (decode-event rules fire in decoder, pre-reassembly) ---
+
+# 1005001: Overlapping IP fragments (classic evasion: overlapping offsets confuse reassembly)
+alert ip any any -> any any (msg:"EVASION Overlapping IP fragments detected"; decode-event:ipv4.frag_overlap; classtype:attempted-recon; sid:1005001; rev:1;)
+
+# --- TTL Anomalies ---
+
+# 1005010: SYN with TTL=1 (traceroute/evasion — packet expires before destination)
+alert tcp any any -> $HOME_NET any (msg:"EVASION TCP SYN with TTL=1 - possible traceroute or IDS evasion"; flags:S; ttl:1; classtype:attempted-recon; sid:1005010; rev:1;)
+
+# 1005011: ICMP with TTL=1 (traceroute probe)
+alert icmp any any -> $HOME_NET any (msg:"EVASION ICMP TTL=1 traceroute probe"; ttl:1; classtype:attempted-recon; sid:1005011; rev:1;)
+
+# --- TCP Flag Anomalies ---
+
+# 1005020: XMAS scan (FIN+PSH+URG flags set)
+alert tcp any any -> $HOME_NET any (msg:"EVASION TCP XMAS scan (FIN+PSH+URG)"; flags:FPU; classtype:attempted-recon; sid:1005020; rev:1;)
+
+# 1005021: NULL scan (no flags set)
+alert tcp any any -> $HOME_NET any (msg:"EVASION TCP NULL scan (no flags)"; flags:0; classtype:attempted-recon; sid:1005021; rev:1;)
+
+# 1005022: FIN-only scan (FIN without ACK — abnormal)
+alert tcp any any -> $HOME_NET any (msg:"EVASION TCP FIN-only scan"; flags:F; classtype:attempted-recon; sid:1005022; rev:1;)
+
+# 1005023: SYN+FIN (impossible combination — evasion/fingerprinting)
+alert tcp any any -> $HOME_NET any (msg:"EVASION TCP SYN+FIN invalid flag combination"; flags:FS; classtype:attempted-recon; sid:1005023; rev:1;)
+
+# --- Spoofed Source IP Addresses ---
+
+# 1005030: Packets from loopback range (127.0.0.0/8) — never legitimate on wire
+alert ip 127.0.0.0/8 any -> $HOME_NET any (msg:"EVASION Spoofed source IP from loopback range (127.x.x.x)"; classtype:bad-unknown; sid:1005030; rev:1;)
+
+# 1005031: Packets from zero network (0.0.0.0/8)
+alert ip 0.0.0.0/8 any -> $HOME_NET any (msg:"EVASION Spoofed source IP from zero network (0.x.x.x)"; classtype:bad-unknown; sid:1005031; rev:1;)
+
+# 1005032: Packets from multicast range (224.0.0.0/4) as source — never valid
+alert ip 224.0.0.0/4 any -> $HOME_NET any (msg:"EVASION Spoofed source IP from multicast range (224.x.x.x)"; classtype:bad-unknown; sid:1005032; rev:1;)
+
+# 1005033: Packets from documentation/test range (192.0.2.0/24 — RFC 5737 TEST-NET-1)
+alert ip 192.0.2.0/24 any -> $HOME_NET any (msg:"EVASION Spoofed source IP from documentation range (192.0.2.x)"; classtype:bad-unknown; sid:1005033; rev:1;)
+
+# --- Multi-source scan detection (threshold-based) ---
+
+# 1005040: Rapid SYN from multiple sources to same destination (coordinated scan)
+alert tcp any any -> $HOME_NET any (msg:"EVASION Multi-source SYN scan detected"; flags:S; threshold:type both, track by_dst, count 50, seconds 60; classtype:attempted-recon; sid:1005040; rev:1;)

@@ -1,0 +1,23 @@
+# IoT Attack Detection Rules
+
+# Credential Stuffing / Brute Force
+alert tcp any any -> $HOME_NET 23 (msg:"IOT Telnet login attempt"; flow:to_server,established; content:"login"; nocase; threshold: type both, track by_src, count 5, seconds 60; classtype:attempted-admin; sid:1000001; rev:1;)
+alert tcp any any -> $HOME_NET 2323 (msg:"IOT Telnet alt-port brute-force (Mirai)"; flow:to_server,established; content:"login"; nocase; threshold: type both, track by_src, count 3, seconds 60; classtype:attempted-admin; sid:1000002; rev:1;)
+alert tcp any any -> $HOME_NET 22 (msg:"IOT SSH brute-force"; flow:to_server; flags:S; threshold: type both, track by_src, count 10, seconds 60; classtype:attempted-admin; sid:1000003; rev:1;)
+alert tcp any any -> $HOME_NET [80,5000,8080] (msg:"IOT HTTP login brute-force"; flow:to_server,established; content:"user"; nocase; content:"pass"; nocase; threshold: type both, track by_src, count 10, seconds 60; classtype:attempted-admin; sid:1000004; rev:2;)
+alert tcp any any -> $HOME_NET [23,2323] (msg:"IOT Mirai credential - admin/admin"; flow:to_server,established; content:"admin"; content:"admin"; distance:0; within:20; classtype:attempted-admin; sid:1000005; rev:1;)
+alert tcp any any -> $HOME_NET [23,2323] (msg:"IOT Mirai credential - root/vizxv"; flow:to_server,established; content:"root"; content:"vizxv"; distance:0; within:20; classtype:attempted-admin; sid:1000007; rev:1;)
+
+# Command Injection — alert tcp (not alert http) for reliable detection on non-standard ports
+alert tcp any any -> $HOME_NET [80,5000,8080] (msg:"IOT HTTP command injection - wget"; flow:to_server,established; content:"wget"; content:"http"; distance:0; within:100; classtype:attempted-admin; sid:1000011; rev:2;)
+alert tcp any any -> $HOME_NET [80,5000,8080] (msg:"IOT HTTP command injection - /bin/sh"; flow:to_server,established; content:"/bin/sh"; classtype:attempted-admin; sid:1000013; rev:2;)
+alert tcp any any -> $HOME_NET any (msg:"IOT Mirai bot payload"; flow:to_server,established; content:"/bin/busybox"; content:"MIRAI"; distance:0; within:100; classtype:trojan-activity; sid:1000014; rev:1;)
+
+# UPnP / SSDP Abuse
+alert udp any any -> 239.255.255.250 1900 (msg:"IOT SSDP M-SEARCH flood"; content:"M-SEARCH"; threshold: type both, track by_src, count 10, seconds 10; classtype:attempted-recon; sid:1000020; rev:2;)
+alert udp any any -> $HOME_NET 1900 (msg:"IOT SSDP M-SEARCH to unicast"; content:"M-SEARCH"; threshold: type both, track by_src, count 10, seconds 10; classtype:attempted-recon; sid:1000022; rev:1;)
+alert tcp any any -> $HOME_NET [80,5000,8080] (msg:"IOT UPnP AddPortMapping"; flow:to_server,established; content:"AddPortMapping"; nocase; classtype:attempted-admin; sid:1000021; rev:2;)
+
+# Port Scanning
+alert tcp any any -> $HOME_NET any (msg:"IOT Vertical port scan"; flags:S; threshold: type both, track by_src, count 50, seconds 10; classtype:attempted-recon; sid:1000040; rev:1;)
+alert tcp any any -> $HOME_NET 23 (msg:"IOT Telnet horizontal scan"; flags:S; threshold: type both, track by_src, count 10, seconds 10; classtype:attempted-recon; sid:1000041; rev:1;)

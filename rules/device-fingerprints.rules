@@ -1,0 +1,111 @@
+# =============================================================================
+# Device & Tool Fingerprinting Rules
+# SID range: 1010001-1010050
+# Identifies: attack tools, scanners, IoT device manufacturers, botnet clients
+# =============================================================================
+
+# --- Attack Tool User-Agent Fingerprints (1010001-1010020) ---
+
+# 1010001: Nikto vulnerability scanner
+alert http any any -> $HOME_NET any (msg:"FP-TOOL Nikto vulnerability scanner"; flow:to_server,established; http.user_agent; content:"Nikto"; nocase; classtype:attempted-recon; sid:1010001; rev:1;)
+
+# 1010002: sqlmap SQL injection tool
+alert http any any -> $HOME_NET any (msg:"FP-TOOL sqlmap SQL injection scanner"; flow:to_server,established; http.user_agent; content:"sqlmap"; nocase; classtype:attempted-recon; sid:1010002; rev:1;)
+
+# 1010003: Nmap NSE script scanner
+alert http any any -> $HOME_NET any (msg:"FP-TOOL Nmap NSE HTTP scan"; flow:to_server,established; http.user_agent; content:"Nmap Scripting Engine"; nocase; classtype:attempted-recon; sid:1010003; rev:1;)
+
+# 1010004: Masscan port scanner
+alert http any any -> $HOME_NET any (msg:"FP-TOOL masscan port scanner"; flow:to_server,established; http.user_agent; content:"masscan"; nocase; classtype:attempted-recon; sid:1010004; rev:1;)
+
+# 1010005: dirb/gobuster/ffuf directory bruteforce
+alert http any any -> $HOME_NET any (msg:"FP-TOOL directory bruteforce (dirb/gobuster/ffuf)"; flow:to_server,established; http.user_agent; pcre:"/(gobuster|dirbuster|ffuf|wfuzz|dirb)/i"; classtype:attempted-recon; sid:1010005; rev:1;)
+
+# 1010006: Burp Suite proxy
+alert http any any -> $HOME_NET any (msg:"FP-TOOL Burp Suite proxy"; flow:to_server,established; http.user_agent; content:"BurpCollaborator"; nocase; classtype:attempted-recon; sid:1010006; rev:1;)
+
+# 1010007: Metasploit Framework
+alert http any any -> $HOME_NET any (msg:"FP-TOOL Metasploit Framework"; flow:to_server,established; http.user_agent; pcre:"/(Metasploit|msfconsole|ruby.*Net::HTTP)/i"; classtype:attempted-recon; sid:1010007; rev:1;)
+
+# 1010008: Nuclei template scanner
+alert http any any -> $HOME_NET any (msg:"FP-TOOL Nuclei vulnerability scanner"; flow:to_server,established; http.user_agent; content:"Nuclei"; nocase; classtype:attempted-recon; sid:1010008; rev:1;)
+
+# 1010009: Hydra brute-force tool
+alert http any any -> $HOME_NET any (msg:"FP-TOOL Hydra brute-force"; flow:to_server,established; http.user_agent; content:"Mozilla/4.0 (Hydra)"; classtype:attempted-recon; sid:1010009; rev:1;)
+
+# 1010010: Wfuzz / wpscan / w3af
+alert http any any -> $HOME_NET any (msg:"FP-TOOL wpscan/w3af scanner"; flow:to_server,established; http.user_agent; pcre:"/(WPScan|w3af|Acunetix|Netsparker|AppScan|Qualys)/i"; classtype:attempted-recon; sid:1010010; rev:1;)
+
+# 1010011: curl/wget probing (often used in exploitation chains)
+alert http any any -> $HOME_NET any (msg:"FP-TOOL curl/wget probe (possible exploitation)"; flow:to_server,established; http.user_agent; pcre:"/^(curl|Wget)\//"; threshold: type both, track by_src, count 20, seconds 60; classtype:attempted-recon; sid:1010011; rev:1;)
+
+# 1010012: Single-character User-Agent (typical of bots/scanners that hardcode "-")
+alert http any any -> $HOME_NET any (msg:"FP-TOOL HTTP request with minimal User-Agent"; flow:to_server,established; http.user_agent; content:"-"; depth:1; isdataat:!2; classtype:bad-unknown; sid:1010012; rev:1;)
+
+# 1010013: Python requests library probing
+alert http any any -> $HOME_NET any (msg:"FP-TOOL Python requests library probe"; flow:to_server,established; http.user_agent; content:"python-requests"; nocase; threshold: type both, track by_src, count 30, seconds 60; classtype:attempted-recon; sid:1010013; rev:1;)
+
+# 1010014: Go HTTP client (often used by Go-based scanners)
+alert http any any -> $HOME_NET any (msg:"FP-TOOL Go HTTP client probe"; flow:to_server,established; http.user_agent; content:"Go-http-client"; threshold: type both, track by_src, count 20, seconds 60; classtype:attempted-recon; sid:1010014; rev:1;)
+
+# 1010015: Shodan/Censys scanner banners
+alert http any any -> $HOME_NET any (msg:"FP-TOOL Shodan/Censys scanner"; flow:to_server,established; http.user_agent; pcre:"/(shodan|censys|zoominfo|onyphe|leakix|binaryedge)/i"; classtype:attempted-recon; sid:1010015; rev:1;)
+
+# --- IoT Device Manufacturer Fingerprints (1010021-1010040) ---
+
+# 1010021: Hikvision camera HTTP server header (response)
+alert http $HOME_NET any -> any any (msg:"FP-DEVICE Hikvision camera detected"; flow:to_client,established; http.server; content:"Hikvision"; nocase; classtype:not-suspicious; sid:1010021; rev:1;)
+
+# 1010022: Dahua camera signature
+alert http $HOME_NET any -> any any (msg:"FP-DEVICE Dahua camera detected"; flow:to_client,established; http.server; content:"Dahua"; nocase; classtype:not-suspicious; sid:1010022; rev:1;)
+
+# 1010023: Axis camera VAPIX API
+alert http any any -> $HOME_NET any (msg:"FP-DEVICE Axis camera VAPIX access"; flow:to_server,established; http.uri; content:"/axis-cgi/"; nocase; classtype:not-suspicious; sid:1010023; rev:1;)
+
+# 1010024: TP-Link router admin path
+alert http any any -> $HOME_NET any (msg:"FP-DEVICE TP-Link router admin endpoint"; flow:to_server,established; http.uri; pcre:"/(\/userRpm\/|\/cgi\?[0-9])/"; classtype:not-suspicious; sid:1010024; rev:1;)
+
+# 1010025: Netgear router signature
+alert http any any -> $HOME_NET any (msg:"FP-DEVICE Netgear router endpoint"; flow:to_server,established; http.uri; pcre:"/\/(NETGEAR_|setup\.cgi|currentsetting\.htm)/i"; classtype:not-suspicious; sid:1010025; rev:1;)
+
+# 1010026: D-Link router signature
+alert http any any -> $HOME_NET any (msg:"FP-DEVICE D-Link router endpoint"; flow:to_server,established; http.uri; pcre:"/\/(HNAP1|tools_admin\.asp|status\.asp)/i"; classtype:not-suspicious; sid:1010026; rev:1;)
+
+# 1010027: Embedded RomPager (vulnerable old web server)
+alert http $HOME_NET any -> any any (msg:"FP-DEVICE RomPager embedded web server (vulnerable)"; flow:to_client,established; http.server; content:"RomPager"; nocase; classtype:bad-unknown; sid:1010027; rev:1;)
+
+# 1010028: GoAhead Web Server (common in IoT, multiple CVEs)
+alert http $HOME_NET any -> any any (msg:"FP-DEVICE GoAhead web server (IoT, multiple CVEs)"; flow:to_client,established; http.server; content:"GoAhead"; nocase; classtype:bad-unknown; sid:1010028; rev:1;)
+
+# 1010029: Mongoose web server (common in IoT)
+alert http $HOME_NET any -> any any (msg:"FP-DEVICE Mongoose embedded web server"; flow:to_client,established; http.server; content:"Mongoose"; nocase; classtype:not-suspicious; sid:1010029; rev:1;)
+
+# 1010030: ESP8266/ESP32 device User-Agent
+alert http $HOME_NET any -> any any (msg:"FP-DEVICE ESP8266/ESP32 IoT device"; flow:to_server,established; http.user_agent; pcre:"/ESP(8266|32)HTTPClient/i"; classtype:not-suspicious; sid:1010030; rev:1;)
+
+# 1010031: Sonos speaker User-Agent
+alert http $HOME_NET any -> any any (msg:"FP-DEVICE Sonos speaker"; flow:to_server,established; http.user_agent; content:"Sonos"; nocase; classtype:not-suspicious; sid:1010031; rev:1;)
+
+# 1010032: Roku streaming device
+alert http $HOME_NET any -> any any (msg:"FP-DEVICE Roku streaming device"; flow:to_server,established; http.user_agent; content:"Roku"; nocase; classtype:not-suspicious; sid:1010032; rev:1;)
+
+# --- Botnet Client User-Agent Fingerprints (1010041-1010050) ---
+
+# 1010041: Mirai-style hardcoded User-Agent (one of many variants)
+alert http any any -> $HOME_NET any (msg:"FP-BOTNET Mirai variant User-Agent"; flow:to_server,established; http.user_agent; pcre:"/^(Mozilla\/5\.0 \(Windows NT 10\.0\)$|Mozilla\/4\.0$|Hello, World$)/"; classtype:trojan-activity; sid:1010041; rev:1;)
+
+# 1010042: Gafgyt/Bashlite default User-Agent
+alert http any any -> $HOME_NET any (msg:"FP-BOTNET Gafgyt/Bashlite User-Agent"; flow:to_server,established; http.user_agent; pcre:"/^(Wget|gafgyt|bashlite)/i"; threshold: type both, track by_src, count 5, seconds 60; classtype:trojan-activity; sid:1010042; rev:1;)
+
+# 1010043: Mozi botnet HTTP probe
+alert http any any -> $HOME_NET any (msg:"FP-BOTNET Mozi-style probe"; flow:to_server,established; http.user_agent; content:"Mozi"; classtype:trojan-activity; sid:1010043; rev:1;)
+
+# 1010044: Hajime botnet User-Agent
+alert http any any -> $HOME_NET any (msg:"FP-BOTNET Hajime User-Agent"; flow:to_server,established; http.user_agent; content:"Hajime"; nocase; classtype:trojan-activity; sid:1010044; rev:1;)
+
+# 1010045: User-Agent with shell metacharacters (injection attempt)
+# pcre needs ; escape inside char class — use multiple content matches instead
+alert http any any -> $HOME_NET any (msg:"FP-ATTACK shell metacharacters in User-Agent"; flow:to_server,established; http.user_agent; pcre:"/(\x24\x7b|\x60|wget |curl |\/bin\/sh|\|)/"; classtype:web-application-attack; sid:1010045; rev:1;)
+
+# 1010046: Telnet banner grab attempt (Mirai-style enumeration)
+alert tcp any any -> $HOME_NET [23,2323] (msg:"FP-ATTACK Telnet enumeration probe"; flow:to_server,established; threshold: type both, track by_src, count 5, seconds 30; classtype:attempted-recon; sid:1010046; rev:1;)

@@ -1,0 +1,76 @@
+%YAML 1.1
+---
+vars:
+  address-groups:
+    HOME_NET: "[192.168.0.0/20,10.0.0.0/24]"
+    EXTERNAL_NET: "!$HOME_NET"
+  port-groups:
+    HTTP_PORTS: "80"
+default-log-dir: /home/orangepi/suricata/
+stats:
+  enabled: yes
+  interval: 8
+outputs:
+  - fast:
+      enabled: yes
+      filename: fast.log
+      append: yes
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: /home/orangepi/iot-gateway/logs/eve.json
+      types:
+        - alert
+        - http
+  - stats:
+      enabled: yes
+      filename: stats.log
+stream:
+  memcap: 64mb
+  checksum-validation: no
+  # midstream: pick up TCP streams that don't start with SYN.
+  # Required for evasion detection: XMAS/FIN/SYN+FIN packets arrive without prior SYN,
+  # so without midstream the stream engine rejects them before detection runs.
+  # NULL scan (flags:0) bypasses stream engine entirely (no TCP flags), which is why
+  # SID 1005021 fires but 1005020/1005022/1005023 don't without this setting.
+  midstream: true
+  # exception-policy: pass packets to detection engine even on stream exceptions.
+  # Default in IPS mode is "drop-flow" which kills the flow on any exception.
+  exception-policy: pass-packet
+  drop-invalid: no
+  reassembly:
+    memcap: 64mb
+    depth: 1mb
+    toserver-chunk-size: 2560
+    toclient-chunk-size: 2560
+app-layer:
+  protocols:
+    http:
+      enabled: yes
+    tls:
+      enabled: yes
+    dns:
+      enabled: yes
+    mqtt:
+      enabled: yes
+      # max-msg-length: 1mb
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - iot-attacks.rules
+  - mirai-variants.rules
+  - firmware-exploits.rules
+  - protocol-abuse.rules
+  - c2-indicators.rules
+  - dns-lateral.rules
+  - network-anomaly.rules
+  - evasion-techniques.rules
+  - tls-fingerprints.rules
+  - iot-advanced.rules
+  - ics-modbus.rules
+  - mqtt-deep.rules
+  - device-fingerprints.rules
+  - coap-deep.rules
+  - anomaly-baseline.rules
+  - local.rules
+classification-file: /usr/local/share/suricata/classification.config
+reference-config-file: /usr/local/share/suricata/reference.config

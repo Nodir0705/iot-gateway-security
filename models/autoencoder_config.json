@@ -1,0 +1,19 @@
+{
+  "threshold": 0.0019333369098603705,
+  "input_features": [
+    "protocol",
+    "dst_port",
+    "flow_duration_ms",
+    "total_fwd_packets",
+    "total_bwd_packets",
+    "total_fwd_bytes",
+    "total_bwd_bytes",
+    "fwd_pkt_len_mean",
+    "bwd_pkt_len_mean",
+    "flow_bytes_per_sec",
+    "flow_pkts_per_sec",
+    "flow_iat_mean_ms",
+    "syn_flag_count"
+  ],
+  "trained_on": "NSL-KDD"
+}

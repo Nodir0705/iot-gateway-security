@@ -1,0 +1,5 @@
+# Network Anomaly Rules
+alert icmp any any -> $HOME_NET any (msg:"IOT ICMP flood"; itype:8; detection_filter: track by_src, count 50, seconds 10; classtype:attempted-dos; sid:1000201; rev:4;)
+alert tcp any any -> $HOME_NET any (msg:"IOT SYN flood"; flags:S; threshold: type both, track by_src, count 100, seconds 10; classtype:attempted-dos; sid:1000202; rev:2;)
+alert udp any any -> $HOME_NET any (msg:"IOT UDP flood"; threshold: type both, track by_src, count 200, seconds 10; classtype:attempted-dos; sid:1000203; rev:2;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IOT Excessive outbound connections"; flow:to_server; flags:S; threshold: type both, track by_src, count 50, seconds 60; classtype:policy-violation; sid:1000210; rev:1;)

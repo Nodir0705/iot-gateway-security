@@ -1,0 +1,5 @@
+# C2 / Botnet Communication Indicators
+alert dns $HOME_NET any -> any any (msg:"IOT DNS query to .test TLD"; dns.query; content:".test"; endswith; classtype:trojan-activity; sid:1000102; rev:1;)
+alert dns $HOME_NET any -> any any (msg:"IOT DNS query to .example.com"; dns.query; content:".example.com"; endswith; classtype:trojan-activity; sid:1000103; rev:1;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IOT Large outbound transfer"; flow:to_server,established; dsize:>10000; threshold: type both, track by_src, count 5, seconds 30; classtype:policy-violation; sid:1000110; rev:1;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET [4444,5555,6666,7777,31337] (msg:"IOT Outbound to suspicious port"; flow:to_server; flags:S; classtype:trojan-activity; sid:1000130; rev:1;)

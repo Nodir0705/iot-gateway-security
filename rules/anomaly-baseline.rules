@@ -1,0 +1,106 @@
+# =============================================================================
+# Anomaly Baseline Detection Rules
+# SID range: 1012001-1012040
+# Detects deviations from typical IoT device behavior:
+#   - Volume/burst anomalies
+#   - Connection diversity (lateral spread, internal scanning)
+#   - Cross-protocol oddities (IoT speaking SMB/RDP/etc)
+#   - Time-of-flight & long-lived connection anomalies
+# =============================================================================
+
+# --- Volume / Burst Anomalies (1012001-1012010) ---
+
+# 1012001: TCP SYN burst from single source — connection storm
+# Lower threshold than DDoS; designed to catch internal lateral spread early
+alert tcp any any -> $HOME_NET any (msg:"ANOMALY-BURST excessive new TCP connections"; flags:S; threshold: type threshold, track by_src, count 20, seconds 10; classtype:attempted-recon; sid:1012001; rev:1;)
+
+# 1012002: Outbound TCP SYN burst — IoT device shouldn't initiate many connections rapidly
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"ANOMALY-BURST outbound connection storm from internal"; flags:S; threshold: type threshold, track by_src, count 15, seconds 10; classtype:attempted-recon; sid:1012002; rev:1;)
+
+# 1012003: ICMP echo flood (covert channel or recon)
+alert icmp any any -> $HOME_NET any (msg:"ANOMALY-BURST ICMP echo burst"; itype:8; threshold: type threshold, track by_src, count 20, seconds 10; classtype:attempted-recon; sid:1012003; rev:1;)
+
+# 1012004: UDP packet burst from single source (non-DNS, non-NTP)
+# count <=20 to work around Suricata 7.0.8 threshold engine quirk
+alert udp any any -> $HOME_NET ![53,123,5353] (msg:"ANOMALY-BURST UDP packet burst (non-standard ports)"; dsize:>0; threshold: type threshold, track by_src, count 20, seconds 30; classtype:attempted-recon; sid:1012004; rev:2;)
+
+# 1012005: DNS query rate spike (potential tunneling or amplification prep)
+alert udp any any -> any 53 (msg:"ANOMALY-BURST DNS query rate spike"; dsize:>0; threshold: type threshold, track by_src, count 20, seconds 30; classtype:bad-unknown; sid:1012005; rev:2;)
+
+# --- Connection Diversity / Internal Scanning (1012011-1012020) ---
+
+# 1012011: Single source hitting many dst ports on same host (vertical scan)
+# Track by src+dst pair using by_src. Lateral movement indicator.
+alert tcp any any -> $HOME_NET any (msg:"ANOMALY-DIVERSITY vertical port scan pattern"; flags:S; threshold: type threshold, track by_src, count 15, seconds 30; classtype:attempted-recon; sid:1012011; rev:1;)
+
+# 1012012: Internal-to-internal SSH (lateral movement via SSH)
+alert tcp $HOME_NET any -> $HOME_NET 22 (msg:"ANOMALY-LATERAL internal SSH connection"; flags:S; threshold: type threshold, track by_src, count 5, seconds 60; classtype:attempted-admin; sid:1012012; rev:1;)
+
+# 1012013: Internal-to-internal Telnet (legacy admin or compromise)
+alert tcp $HOME_NET any -> $HOME_NET [23,2323] (msg:"ANOMALY-LATERAL internal telnet"; flags:S; classtype:attempted-admin; sid:1012013; rev:1;)
+
+# 1012014: Internal RDP (no IoT device should run/use RDP)
+alert tcp $HOME_NET any -> $HOME_NET 3389 (msg:"ANOMALY-LATERAL internal RDP connection"; flags:S; classtype:attempted-admin; sid:1012014; rev:1;)
+
+# 1012015: Internal SMB (almost always malicious in IoT segment)
+alert tcp $HOME_NET any -> $HOME_NET [445,139] (msg:"ANOMALY-LATERAL internal SMB connection"; flags:S; classtype:attempted-admin; sid:1012015; rev:1;)
+
+# --- Cross-Protocol Anomalies (1012021-1012030) ---
+
+# 1012021: DNS over non-standard port (DNS tunneling indicator)
+# DNS query format on UDP port that isn't 53/5353/853
+alert udp any any -> any ![53,5353,853] (msg:"ANOMALY-PROTOCOL DNS-like payload on non-DNS port"; content:"|01 00 00 01 00 00 00 00 00 00|"; offset:2; depth:10; classtype:bad-unknown; sid:1012021; rev:1;)
+
+# 1012022: HTTP request on non-HTTP port (binary tunneling)
+alert tcp any any -> any ![80,8080,5000,8000,8443,443] (msg:"ANOMALY-PROTOCOL HTTP request on non-HTTP port"; flow:to_server,established; content:"GET "; depth:4; classtype:policy-violation; sid:1012022; rev:1;)
+
+# 1012023: TLS ClientHello on non-TLS port (encrypted tunneling)
+alert tcp any any -> any ![443,8443,993,995,465,587,636,853,5061,8883] (msg:"ANOMALY-PROTOCOL TLS handshake on non-TLS port"; flow:to_server,established; content:"|16 03|"; depth:2; classtype:policy-violation; sid:1012023; rev:1;)
+
+# 1012024: SSH banner on non-SSH port (port hopping evasion)
+# Add flow:to_server and exclude src=22 to prevent FP on legit SSH server responses
+alert tcp any !22 -> any !22 (msg:"ANOMALY-PROTOCOL SSH banner on non-SSH port"; flow:to_server,established; content:"SSH-2.0"; depth:7; classtype:policy-violation; sid:1012024; rev:2;)
+
+# 1012025: Outbound connection to dynamic DNS provider (C2 indicator)
+# DNS app-layer rule + payload fallback for parser-less detection
+alert dns $HOME_NET any -> any any (msg:"ANOMALY-DDNS dynamic DNS query (C2 indicator)"; dns.query; pcre:"/(no-ip|duckdns|dyndns|ddns\.net|sytes\.net|hopto\.org|zapto\.org|myftp\.org|servehttp|serveirc|serveminecraft|servepics|serverquake)/i"; classtype:bad-unknown; sid:1012025; rev:2;)
+alert udp $HOME_NET any -> any 53 (msg:"ANOMALY-DDNS dynamic DNS query (C2 indicator)"; pcre:"/(no-ip|duckdns|dyndns|ddns)/i"; classtype:bad-unknown; sid:1012027; rev:1;)
+
+# 1012026: Outbound DNS query for .onion (Tor) or .bit (Namecoin)
+alert dns $HOME_NET any -> any any (msg:"ANOMALY-PROTOCOL Tor/Namecoin DNS query"; dns.query; pcre:"/\.(onion|bit|i2p)$/i"; classtype:trojan-activity; sid:1012026; rev:2;)
+alert udp $HOME_NET any -> any 53 (msg:"ANOMALY-PROTOCOL Tor/Namecoin DNS query"; pcre:"/(\x06onion|\x03bit\x00)/"; classtype:trojan-activity; sid:1012028; rev:1;)
+
+# --- IoT-Specific Behavioral Anomalies (1012031-1012040) ---
+
+# 1012031: IoT device making outbound HTTPS to high port (>10000)
+# Most IoT cloud APIs use 443. Non-443 HTTPS = backdoor or non-standard C2.
+alert tcp $HOME_NET any -> $EXTERNAL_NET 10000:65535 (msg:"ANOMALY-IOT outbound HTTPS to high port"; flow:to_server,established; content:"|16 03|"; depth:2; classtype:policy-violation; sid:1012031; rev:1;)
+
+# 1012032: IoT outbound to commonly abused ports (4444, 1337, 31337, 6667)
+alert tcp $HOME_NET any -> $EXTERNAL_NET [4444,1337,31337,6667,5555,9999] (msg:"ANOMALY-IOT outbound to commonly abused port"; flags:S; classtype:trojan-activity; sid:1012032; rev:1;)
+
+# 1012033: IoT device using IRC (almost always botnet C2)
+alert tcp $HOME_NET any -> $EXTERNAL_NET [6660:6669,6697,7000] (msg:"ANOMALY-IOT IRC connection from internal device"; flags:S; classtype:trojan-activity; sid:1012033; rev:1;)
+
+# 1012034: IoT device trying to send email (SMTP) — very rare for legit IoT
+alert tcp $HOME_NET any -> any [25,587,465] (msg:"ANOMALY-IOT outbound SMTP (rare for IoT)"; flags:S; classtype:policy-violation; sid:1012034; rev:1;)
+
+# 1012035: IoT device making FTP connection (legacy, often malware staging)
+alert tcp $HOME_NET any -> any [20,21] (msg:"ANOMALY-IOT FTP connection from internal device"; flags:S; classtype:policy-violation; sid:1012035; rev:1;)
+
+# 1012036: Outbound NTP to non-standard server (NTP amplification recon)
+alert udp $HOME_NET any -> $EXTERNAL_NET 123 (msg:"ANOMALY-IOT outbound NTP to external (uncommon)"; threshold: type threshold, track by_src, count 10, seconds 60; classtype:policy-violation; sid:1012036; rev:1;)
+
+# 1012037: Large UDP fragment (DoS preparation or evasion)
+# fragbits requires ip rule, not udp. Use ip + proto check.
+alert ip any any -> $HOME_NET any (msg:"ANOMALY-FRAGMENT IP fragment with more-fragments flag"; fragbits:M; ip_proto:17; classtype:bad-unknown; sid:1012037; rev:2;)
+
+# 1012038: TCP Window size 0 (zero window — DoS pattern or stuck connection)
+alert tcp any any -> $HOME_NET any (msg:"ANOMALY-TCP zero window probe"; flags:A; window:0; threshold: type threshold, track by_src, count 5, seconds 30; classtype:bad-unknown; sid:1012038; rev:1;)
+
+# 1012039: Outbound to RFC 1918 from RFC 1918 — east-west traffic suspicious in IoT seg
+# Track by_src means catches lateral spreading from one device to many
+alert tcp 10.0.0.0/8 any -> 10.0.0.0/8 any (msg:"ANOMALY-LATERAL east-west traffic in IoT segment"; flags:S; threshold: type threshold, track by_src, count 15, seconds 30; classtype:attempted-recon; sid:1012039; rev:1;)
+
+# 1012040: Empty UDP packet (probing/keepalive abuse)
+alert udp any any -> $HOME_NET any (msg:"ANOMALY-UDP zero-payload packet probe"; dsize:0; threshold: type threshold, track by_src, count 10, seconds 30; classtype:bad-unknown; sid:1012040; rev:1;)

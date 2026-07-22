@@ -1,0 +1,89 @@
+# =============================================================================
+# CoAP Deep Inspection Rules — Payload-based (no Suricata parser available)
+# SID range: 1011001-1011030
+# CoAP RFC 7252: UDP port 5683 (CoAP), 5684 (CoAPs DTLS)
+# Header: Ver(2)|Type(2)|TKL(4) | Code | MsgID(2)
+#         Byte 0 = 0x40-0x4F for valid CoAP v1 (Ver=01)
+#         Byte 1 codes: 0x01=GET, 0x02=POST, 0x03=PUT, 0x04=DELETE
+# =============================================================================
+
+# --- CoAP Method Detection (1011001-1011004) ---
+
+# 1011001: CoAP GET request to internal device
+# Byte 0 = 0x40 (CON, TKL=0), Byte 1 = 0x01 (GET)
+alert udp any any -> $HOME_NET 5683 (msg:"COAP GET request"; content:"|40 01|"; depth:2; classtype:not-suspicious; sid:1011001; rev:1;)
+
+# 1011002: CoAP POST request (write/create resource)
+alert udp any any -> $HOME_NET 5683 (msg:"COAP POST request"; content:"|40 02|"; depth:2; classtype:not-suspicious; sid:1011002; rev:1;)
+
+# 1011003: CoAP PUT request (update resource — sensitive)
+alert udp any any -> $HOME_NET 5683 (msg:"COAP PUT request to internal device"; content:"|40 03|"; depth:2; classtype:attempted-admin; sid:1011003; rev:1;)
+
+# 1011004: CoAP DELETE request (resource destruction — high risk)
+alert udp any any -> $HOME_NET 5683 (msg:"COAP DELETE request to internal device"; content:"|40 04|"; depth:2; classtype:attempted-admin; sid:1011004; rev:1;)
+
+# --- Resource Discovery & Enumeration (1011010-1011014) ---
+
+# 1011010: CoAP /.well-known/core enumeration (resource discovery probe)
+# RFC 6690 - all CoAP endpoints expose this for resource listing
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-RECON .well-known/core resource discovery"; content:".well-known"; classtype:attempted-recon; sid:1011010; rev:1;)
+
+# 1011011: CoAP repeated requests from same source (scanner pattern)
+# Use threshold type threshold instead of detection_filter (more reliable for UDP)
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-RECON request flood (scanner pattern)"; content:"|40|"; depth:1; threshold: type threshold, track by_src, count 20, seconds 60; classtype:attempted-recon; sid:1011011; rev:7;)
+
+# 1011012: CoAP request to firmware/update endpoint
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ATTACK firmware/update endpoint access"; pcre:"/(firmware|fwupdate|ota|update|upgrade)/i"; classtype:policy-violation; sid:1011012; rev:1;)
+
+# 1011013: CoAP request to admin/config endpoint
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ATTACK admin/config endpoint access"; pcre:"/(admin|config|settings|password|cred)/i"; classtype:attempted-admin; sid:1011013; rev:1;)
+
+# 1011014: CoAP request to debug/shell endpoint (backdoor probe)
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ATTACK debug/shell endpoint probe"; pcre:"/(shell|debug|exec|cmd|backdoor)/i"; classtype:trojan-activity; sid:1011014; rev:1;)
+
+# --- Payload Anomalies (1011020-1011024) ---
+
+# 1011020: CoAP packet larger than typical IoT telemetry (>1KB)
+# Most legitimate CoAP messages are <100 bytes
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ANOMALY oversized message (>1KB possible exfil)"; dsize:>1024; classtype:policy-violation; sid:1011020; rev:1;)
+
+# 1011021: CoAP DTLS flood (5684) — DDoS amplification potential
+alert udp any any -> $HOME_NET 5684 (msg:"COAP-DOS DTLS flood"; dsize:>0; threshold: type threshold, track by_src, count 20, seconds 60; classtype:attempted-dos; sid:1011021; rev:7;)
+
+# 1011022: CoAP shell command in payload (RCE attempt)
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ATTACK shell command in payload"; pcre:"/(\/bin\/(sh|bash)|wget |curl |chmod |\/tmp\/)/"; classtype:trojan-activity; sid:1011022; rev:1;)
+
+# 1011023: CoAP path traversal attempt
+# CoAP encodes URI path as length-prefixed segments — `..` appears as a 2-byte segment.
+# Match: option header for ".." segment OR URL-encoded variants in payload
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ATTACK path traversal attempt"; pcre:"/(\x02\x2e\x2e|\.\.\/|\.\.\\|%2e%2e|%2f\.\.|\.\.%2f)/i"; classtype:web-application-attack; sid:1011023; rev:2;)
+
+# 1011024: CoAP SQL injection pattern
+# pcre with ; needs hex escape (\x3b) to avoid breaking rule parser
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ATTACK SQL injection pattern"; pcre:"/(union\s+select|or\s+1\s*=\s*1|\x27\x3b\s*drop)/i"; classtype:web-application-attack; sid:1011024; rev:1;)
+
+# --- Protocol Abuse (1011025-1011030) ---
+
+# 1011025: CoAP non-confirmable (NON) message flood — no ACK required, harder to trace
+# Byte 0 = 0x50 (NON, TKL=0). byte_test bitmask is unreliable in 7.0.8 — use content.
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ABUSE NON message flood (no ACK trace)"; content:"|50|"; depth:1; threshold: type threshold, track by_src, count 20, seconds 60; classtype:attempted-dos; sid:1011025; rev:7;)
+
+# 1011026: CoAP RST message (reset — abuse for connection disruption)
+# Byte 0 = 0x70 (RST, TKL=0).
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ABUSE excessive RST messages"; content:"|70|"; depth:1; threshold: type threshold, track by_src, count 20, seconds 60; classtype:attempted-dos; sid:1011026; rev:6;)
+
+# 1011027: CoAP Observe option abuse — server pushes updates indefinitely
+# Observe option (number 6) followed by 0 (register)
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ABUSE Observe registration flood"; content:"|60|"; threshold: type both, track by_src, count 20, seconds 30; classtype:attempted-dos; sid:1011027; rev:1;)
+
+# 1011028: CoAP block-wise transfer abuse (block 2/1 option misuse)
+# Block options used for chunked transfer — abused for fragmentation evasion
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-EVASION block-wise transfer fragmentation"; pcre:"/Block(1|2)/"; classtype:attempted-recon; sid:1011028; rev:1;)
+
+# 1011029: Outbound CoAP from internal IoT to external (data exfil)
+alert udp $HOME_NET any -> $EXTERNAL_NET 5683 (msg:"COAP-EXFIL outbound CoAP from IoT device"; classtype:policy-violation; sid:1011029; rev:1;)
+
+# 1011030: CoAP malformed header (Version != 1, invalid for RFC 7252)
+# Valid v1 first byte: 0x40-0x7F. Invalid: 0x00-0x3F or 0x80-0xFF.
+# byte_test bitmask is broken in 7.0.8 — match each invalid prefix nibble explicitly.
+alert udp any any -> $HOME_NET 5683 (msg:"COAP-ANOMALY invalid version (parser fuzzing)"; pcre:"/^[\x00-\x3f\x80-\xff]/"; classtype:protocol-command-decode; sid:1011030; rev:2;)

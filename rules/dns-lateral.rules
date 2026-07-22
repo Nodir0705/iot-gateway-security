@@ -1,0 +1,38 @@
+# DNS Tunneling, DGA, Lateral Movement, Exfiltration
+
+# DNS tunneling - long queries
+alert dns $HOME_NET any -> any any (msg:"IOT DNS query over 50 chars - possible tunnel"; dns.query; pcre:"/^.{50,}/"; classtype:policy-violation; sid:1004001; rev:1;)
+alert dns $HOME_NET any -> any any (msg:"IOT DNS high frequency query burst"; threshold: type both, track by_src, count 50, seconds 10; classtype:policy-violation; sid:1004003; rev:1;)
+alert dns $HOME_NET any -> any any (msg:"IOT DNS TXT record exfiltration attempt"; content:"|00 10 00 01|"; classtype:policy-violation; sid:1004004; rev:1;)
+
+# DGA suspicious TLDs
+alert dns $HOME_NET any -> any any (msg:"IOT DNS .top TLD DGA candidate"; dns.query; content:".top"; endswith; threshold: type both, track by_src, count 5, seconds 60; classtype:trojan-activity; sid:1004010; rev:1;)
+alert dns $HOME_NET any -> any any (msg:"IOT DNS .xyz TLD DGA candidate"; dns.query; content:".xyz"; endswith; threshold: type both, track by_src, count 5, seconds 60; classtype:trojan-activity; sid:1004011; rev:1;)
+alert dns $HOME_NET any -> any any (msg:"IOT DNS .pw TLD DGA candidate"; dns.query; content:".pw"; endswith; threshold: type both, track by_src, count 3, seconds 60; classtype:trojan-activity; sid:1004012; rev:1;)
+alert dns $HOME_NET any -> any any (msg:"IOT DNS .tk TLD DGA candidate"; dns.query; content:".tk"; endswith; threshold: type both, track by_src, count 5, seconds 60; classtype:trojan-activity; sid:1004013; rev:1;)
+alert dns $HOME_NET any -> any any (msg:"IOT DNS .ru domain suspicious IoT traffic"; dns.query; content:".ru"; endswith; threshold: type both, track by_src, count 10, seconds 60; classtype:policy-violation; sid:1004014; rev:1;)
+alert dns $HOME_NET any -> any any (msg:"IOT DNS .cn domain suspicious IoT traffic"; dns.query; content:".cn"; endswith; threshold: type both, track by_src, count 10, seconds 60; classtype:policy-violation; sid:1004015; rev:1;)
+
+# Internal lateral movement
+alert tcp $HOME_NET any -> $HOME_NET any (msg:"IOT Internal horizontal port scan"; flags:S; threshold: type both, track by_src, count 30, seconds 10; classtype:attempted-recon; sid:1004030; rev:1;)
+alert tcp $HOME_NET any -> $HOME_NET [445,139,135] (msg:"IOT SMB scan from IoT device"; flow:to_server; flags:S; classtype:attempted-recon; sid:1004031; rev:1;)
+alert tcp $HOME_NET any -> $HOME_NET 3389 (msg:"IOT RDP scan from IoT device"; flow:to_server; flags:S; classtype:attempted-recon; sid:1004032; rev:1;)
+alert tcp $HOME_NET any -> $HOME_NET [3306,5432,1433,27017] (msg:"IOT Database port scan from IoT device"; flow:to_server; flags:S; classtype:attempted-recon; sid:1004033; rev:1;)
+
+# NTP amplification
+alert udp $HOME_NET any -> any 123 (msg:"IOT NTP monlist DDoS amplification"; content:"|17 00 03 2a|"; depth:4; classtype:attempted-dos; sid:1004050; rev:1;)
+
+# SSDP amplification (outbound reflection)
+alert udp $HOME_NET any -> $EXTERNAL_NET 1900 (msg:"IOT SSDP outbound - DDoS reflector"; content:"M-SEARCH"; threshold: type both, track by_src, count 20, seconds 10; classtype:attempted-dos; sid:1004051; rev:1;)
+
+# Data exfiltration
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IOT Sustained large outbound data"; flow:established; dsize:>8000; threshold: type both, track by_src, count 20, seconds 60; classtype:policy-violation; sid:1004040; rev:1;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IOT Outbound connection burst"; flow:to_server; flags:S; threshold: type both, track by_src, count 80, seconds 60; classtype:policy-violation; sid:1004041; rev:1;)
+
+# Cryptocurrency mining (IoT cryptojacking)
+alert tcp $HOME_NET any -> $EXTERNAL_NET [3333,4444,5555,7777,8333,9999,14433] (msg:"IOT Cryptomining pool port outbound"; flow:to_server; flags:S; classtype:policy-violation; sid:1004060; rev:1;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET any (msg:"IOT Monero stratum mining protocol"; flow:to_server,established; content:"stratum+tcp"; classtype:policy-violation; sid:1004061; rev:1;)
+
+# Tor / proxy evasion
+alert tcp $HOME_NET any -> $EXTERNAL_NET 9001 (msg:"IOT Tor relay port outbound"; flow:to_server; flags:S; classtype:policy-violation; sid:1004070; rev:1;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET 9050 (msg:"IOT Tor SOCKS outbound"; flow:to_server; flags:S; classtype:policy-violation; sid:1004071; rev:1;)

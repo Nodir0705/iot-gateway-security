@@ -1,0 +1,26 @@
+# =============================================================================
+# ICS/Modbus Protocol Detection Rules — v7 Stress Test
+# SID range: 1008001-1008005
+# Based on VPNFilter Modbus sniffer, Industroyer ICS manipulation
+# Detects: Modbus read/write operations, diagnostics, exception responses
+# =============================================================================
+
+# 1008001: Modbus read holding registers (FC 0x03)
+# Common reconnaissance — reading PLC register values
+alert tcp any any -> $HOME_NET 502 (msg:"ICS-MODBUS read holding registers (FC 03)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|03|"; offset:7; depth:1; classtype:protocol-command-decode; sid:1008001; rev:1;)
+
+# 1008002: Modbus write single coil (FC 0x05)
+# Actuator manipulation — turning outputs on/off
+alert tcp any any -> $HOME_NET 502 (msg:"ICS-MODBUS write single coil (FC 05)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|05|"; offset:7; depth:1; classtype:protocol-command-decode; sid:1008002; rev:1;)
+
+# 1008003: Modbus write multiple registers (FC 0x10)
+# Bulk PLC register modification — high-impact write
+alert tcp any any -> $HOME_NET 502 (msg:"ICS-MODBUS write multiple registers (FC 10)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|10|"; offset:7; depth:1; classtype:protocol-command-decode; sid:1008003; rev:1;)
+
+# 1008004: Modbus diagnostics restart (FC 0x08, sub 0x01)
+# Device restart command — denial of service
+alert tcp any any -> $HOME_NET 502 (msg:"ICS-MODBUS diagnostics restart comm (FC 08)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|08|"; offset:7; depth:1; content:"|00 01|"; offset:8; depth:2; classtype:protocol-command-decode; sid:1008004; rev:1;)
+
+# 1008005: Modbus exception response (FC >= 0x80)
+# Server responding with error — may indicate failed exploitation attempt
+alert tcp $HOME_NET 502 -> any any (msg:"ICS-MODBUS exception response"; flow:to_client,established; content:"|00 00|"; offset:2; depth:2; byte_test:1,>=,128,7; classtype:protocol-command-decode; sid:1008005; rev:1;)

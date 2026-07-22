@@ -1,0 +1,77 @@
+# =============================================================================
+# MQTT Deep Inspection Rules — Suricata 7.x MQTT Parser
+# SID range: 1009001-1009030
+# Requires: app-layer mqtt enabled in suricata-iot.yaml
+# =============================================================================
+
+# --- Authentication & Access Control ---
+
+# 1009001: MQTT CONNECT without username — detected via brute-force rule (1009005)
+# Empty sticky buffer match not supported — anonymous detection via threshold instead
+
+# 1009002: MQTT CONNECT with default username "admin"
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-AUTH default username admin"; mqtt.type:CONNECT; mqtt.connect.username; content:"admin"; nocase; classtype:attempted-admin; sid:1009002; rev:1;)
+
+# 1009003: MQTT CONNECT with default password "password"
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-AUTH default password - password"; mqtt.type:CONNECT; mqtt.connect.password; content:"password"; nocase; classtype:attempted-admin; sid:1009003; rev:1;)
+
+# 1009004: MQTT CONNECT with default password "admin"
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-AUTH default password - admin"; mqtt.type:CONNECT; mqtt.connect.password; content:"admin"; nocase; classtype:attempted-admin; sid:1009004; rev:1;)
+
+# 1009005: MQTT brute-force (multiple CONNECT packets from same source)
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-AUTH connect brute-force"; mqtt.type:CONNECT; threshold: type both, track by_src, count 10, seconds 30; classtype:attempted-admin; sid:1009005; rev:1;)
+
+# --- Topic Abuse & Dangerous Subscriptions ---
+
+# 1009010: MQTT wildcard subscribe to ALL topics (#)
+# mqtt.subscribe.topic not reliable in 7.0.8 — use TCP content match.
+# SUBSCRIBE (0x82) + topic length 0x0001 + "#" (0x23)
+alert tcp any any -> $HOME_NET 1883 (msg:"MQTT-RECON wildcard subscribe all topics (#)"; flow:to_server,established; content:"|82|"; depth:1; content:"|00 01 23|"; distance:2; within:20; classtype:attempted-recon; sid:1009010; rev:2;)
+
+# 1009011: MQTT subscribe to $SYS/# (broker internals — info disclosure)
+alert tcp any any -> $HOME_NET 1883 (msg:"MQTT-RECON subscribe to $SYS broker internals"; flow:to_server,established; content:"|82|"; depth:1; content:"$SYS/"; distance:2; within:40; classtype:attempted-recon; sid:1009011; rev:2;)
+
+# 1009012: MQTT publish to command/control topic pattern
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-C2 publish to cmd/ topic"; mqtt.type:PUBLISH; mqtt.publish.topic; content:"cmd/"; classtype:trojan-activity; sid:1009012; rev:1;)
+
+# 1009013: MQTT publish to shell/exec topic pattern
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-C2 publish to shell or exec topic"; mqtt.type:PUBLISH; mqtt.publish.topic; pcre:"/^(shell|exec|command|run)\//i"; classtype:trojan-activity; sid:1009013; rev:1;)
+
+# 1009014: MQTT publish to OTA/firmware update topic
+# Attacker pushing rogue firmware via MQTT
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-ATTACK publish to firmware/OTA topic"; mqtt.type:PUBLISH; mqtt.publish.topic; pcre:"/(firmware|ota|update|fwupdate)\//i"; classtype:policy-violation; sid:1009014; rev:1;)
+
+# 1009015: MQTT subscribe to wildcard + (single-level) in sensitive path
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-RECON wildcard subscribe with + in sensitive path"; mqtt.type:SUBSCRIBE; mqtt.subscribe.topic; pcre:"/^(home|device|sensor|actuator)\/\+/"; classtype:attempted-recon; sid:1009015; rev:1;)
+
+# --- Client ID Anomalies ---
+
+# 1009020: MQTT client ID looks like random hex (botnet pattern)
+# Mirai/Mozi bots use random hex client IDs like "a3f7b2c1d4e5"
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-BOTNET random hex client ID (possible bot)"; mqtt.type:CONNECT; mqtt.connect.clientid; pcre:"/^[0-9a-f]{12,32}$/"; classtype:trojan-activity; sid:1009020; rev:1;)
+
+# 1009021: MQTT client ID contains suspicious tool name
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-RECON tool client ID (paho/mqttx/mqtt-explorer)"; mqtt.type:CONNECT; mqtt.connect.clientid; pcre:"/(paho|mqttx|mqtt-explorer|mqtt.fx|hivemq|mosquitto_sub)/i"; classtype:attempted-recon; sid:1009021; rev:1;)
+
+# --- Payload Inspection ---
+
+# 1009025: MQTT publish with shell command in payload
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-ATTACK shell command in publish payload"; mqtt.type:PUBLISH; mqtt.publish.message; pcre:"/(\/bin\/(sh|bash)|wget |curl |chmod |nc -|\/tmp\/)/"; classtype:trojan-activity; sid:1009025; rev:1;)
+
+# 1009026: MQTT publish with large payload (>50KB — unusual for IoT telemetry)
+# dsize not compatible with mqtt app-layer — use tcp with MQTT PUBLISH header byte
+alert tcp any any -> $HOME_NET 1883 (msg:"MQTT-EXFIL large publish payload (>50KB)"; flow:to_server,established; content:"|30|"; depth:1; dsize:>50000; classtype:policy-violation; sid:1009026; rev:1;)
+
+# --- Protocol Version & Will Message ---
+
+# 1009028: MQTT v3.1 (old protocol — MQIsdp, known vulnerabilities)
+# mqtt.connect.protocol_string not available in 7.0.8 — use tcp content match
+alert tcp any any -> $HOME_NET 1883 (msg:"MQTT-VULN old protocol v3.1 (MQIsdp)"; flow:to_server,established; content:"|10|"; depth:1; content:"MQIsdp"; within:20; classtype:policy-violation; sid:1009028; rev:1;)
+
+# 1009029: MQTT will message with command payload (LWT abuse)
+# Attacker sets a will message that executes when they "disconnect"
+alert mqtt any any -> $HOME_NET 1883 (msg:"MQTT-C2 will message contains command"; mqtt.type:CONNECT; mqtt.connect.willmessage; pcre:"/(\/bin\/|wget |curl |exec|system)/"; classtype:trojan-activity; sid:1009029; rev:1;)
+
+# 1009030: MQTT QoS 2 (exactly-once) — rare in IoT, potential data exfil
+# mqtt.qos not reliable in 7.0.8 — match QoS2 PUBLISH header byte (0x34 = 0x30 | QoS2<<1)
+alert tcp any any -> $HOME_NET 1883 (msg:"MQTT-ANOMALY QoS 2 exactly-once delivery"; flow:to_server,established; content:"|34|"; depth:1; classtype:policy-violation; sid:1009030; rev:2;)

@@ -1,0 +1,40 @@
+# =============================================================================
+# TLS Fingerprint & Encrypted C2 Detection Rules — v4 Stress Test
+# SID range: 1006001-1006021
+# Detects: TLS to C2 ports, SSLv3 usage, known-bad JA3 hashes
+# =============================================================================
+
+# --- TLS to suspicious C2 ports ---
+
+# 1006010: TLS ClientHello to known C2 ports (4444, 5555, 6666, 8888, 31337)
+# Detects TLS handshake initiation (content 0x16 0x03 = TLS record, 0x01 = ClientHello)
+alert tcp any any -> $HOME_NET [4444,5555,6666,8888,31337] (msg:"TLS-C2 TLS ClientHello to known C2 port"; flow:to_server,established; content:"|16 03|"; offset:0; depth:2; content:"|01|"; offset:5; depth:1; classtype:trojan-activity; sid:1006010; rev:1;)
+
+# 1006011: TLS to port 4444 (Metasploit default)
+alert tcp any any -> $HOME_NET 4444 (msg:"TLS-C2 TLS connection to Metasploit default port 4444"; flow:to_server; content:"|16 03|"; offset:0; depth:2; classtype:trojan-activity; sid:1006011; rev:1;)
+
+# 1006012: TLS to port 31337 (classic backdoor)
+alert tcp any any -> $HOME_NET 31337 (msg:"TLS-C2 TLS connection to backdoor port 31337"; flow:to_server; content:"|16 03|"; offset:0; depth:2; classtype:trojan-activity; sid:1006012; rev:1;)
+
+# --- SSLv3 Detection (deprecated, often used by malware) ---
+
+# 1006020: SSLv3 ClientHello detected (0x16 0x03 0x00 = SSLv3)
+alert tcp any any -> $HOME_NET any (msg:"TLS-VULN SSLv3 ClientHello detected (deprecated protocol)"; flow:to_server,established; content:"|16 03 00|"; offset:0; depth:3; content:"|01|"; offset:5; depth:1; classtype:bad-unknown; sid:1006020; rev:1;)
+
+# 1006021: SSLv3 to HTTPS port (443/8443) — likely POODLE or legacy malware
+alert tcp any any -> $HOME_NET [443,8443] (msg:"TLS-VULN SSLv3 to HTTPS port - possible POODLE or legacy malware"; flow:to_server; content:"|16 03 00|"; offset:0; depth:3; classtype:bad-unknown; sid:1006021; rev:1;)
+
+# --- Known-bad JA3 Hashes (stretch goals — require ja3 keyword support) ---
+
+# 1006030: Cobalt Strike-like JA3 hash (TLS 1.0, ciphers 47-53)
+# JA3 string: "769,47-53,,," → MD5: dac4920d4335e769327dbf4e1b759e15
+alert tls any any -> any any (msg:"TLS-C2 Cobalt Strike JA3 fingerprint"; ja3.hash; content:"dac4920d4335e769327dbf4e1b759e15"; classtype:trojan-activity; sid:1006030; rev:2;)
+
+# 1006031: Meterpreter-like JA3 hash (TLS 1.2, ciphers 49195-49199, extensions 0-13-10-11, curves 23-24)
+# JA3 string: "771,49195-49199,0-13-10-11,23-24,0" → MD5: f1b5c09743c9287f60dc420abfd3d6b5
+# Record layer fixed to use 0x0301 (TLS 1.0) per RFC for correct Suricata parsing
+alert tls any any -> any any (msg:"TLS-C2 Metasploit Meterpreter JA3 fingerprint"; ja3.hash; content:"f1b5c09743c9287f60dc420abfd3d6b5"; classtype:trojan-activity; sid:1006031; rev:5;)
+
+# 1006032: Trickbot-like JA3 hash (TLS 1.0, ciphers 53-132-47)
+# JA3 string: "769,53-132-47,,," → MD5: 5dff268a427eda8a77076c3781e96671
+alert tls any any -> any any (msg:"TLS-C2 Trickbot JA3 fingerprint"; ja3.hash; content:"5dff268a427eda8a77076c3781e96671"; classtype:trojan-activity; sid:1006032; rev:2;)

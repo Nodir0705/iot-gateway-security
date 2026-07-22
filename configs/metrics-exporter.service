@@ -1,0 +1,15 @@
+[Unit]
+Description=IoT Gateway Metrics Exporter (JSONL -> InfluxDB)
+After=network.target influxdb.service
+Wants=influxdb.service
+
+[Service]
+User=orangepi
+ExecStart=/usr/bin/python3 /home/orangepi/iot-gateway/scripts/metrics_exporter.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/orangepi/iot-gateway/logs/metrics_exporter.log
+StandardError=append:/home/orangepi/iot-gateway/logs/metrics_exporter.log
+
+[Install]
+WantedBy=multi-user.target
