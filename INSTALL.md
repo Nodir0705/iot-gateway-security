@@ -70,15 +70,19 @@ sudo nft -f /etc/nftables-iot.conf
 ```
 
 ### Passwordless sudo for the dashboard attack simulators
-The dashboard launches attack scripts with `sudo` (the plaintext password was
-**removed** for publishing). Grant the runtime user `NOPASSWD` for those scripts,
-e.g. in `/etc/sudoers.d/iot-gateway`:
+The dashboard launches the attack scripts with `sudo -n`. Allow only those
+scripts, not `python3` or `bash` in general (that would give the dashboard user
+full root). In `/etc/sudoers.d/iot-gateway` (edit with `sudo visudo -f`):
 
 ```
-orangepi ALL=(ALL) NOPASSWD: /usr/bin/python3, /bin/bash
+Cmnd_Alias IOTGW_ATTACKS = \
+    /usr/bin/python3 -u /home/orangepi/iot-gateway/scripts/attack_*.py *, \
+    /bin/bash /home/orangepi/iot-gateway/scripts/attack_flood.sh *
+orangepi ALL=(root) NOPASSWD: IOTGW_ATTACKS
 ```
 
-(Scope this down to the specific attack scripts for production.)
+Make the scripts root-owned and not writable by `orangepi`, otherwise the user
+could edit a script and run anything as root.
 
 ## 6. Build native / eBPF artifacts
 

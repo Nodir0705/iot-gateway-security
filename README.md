@@ -1,159 +1,108 @@
-# IoT Security Gateway (Orange Pi 5 / RK3588)
+# IoT Security Gateway
 
-A multi-layer network security gateway for IoT devices, built on an Orange Pi 5
-(RK3588, ARM64). It combines kernel-level packet filtering (XDP/eBPF), a
-signature-based IDS (Suricata 7.0.8), ML anomaly detection accelerated on the
-RK3588's 3-core NPU, behavioral analysis, and automated response (nftables
-quarantine + MQTT alerts), with a Flask web dashboard for monitoring and attack
-simulation.
+A small box that sits in front of IoT devices, inspects every packet, and cuts off a device automatically when it starts behaving like it has been hacked. Runs entirely on an Orange Pi 5 (RK3588S), with ML inference on the board's NPU and no cloud.
 
-> Development history and the current unfinished items are documented in
-> [`docs/DEVELOPMENT_STAGES.md`](docs/DEVELOPMENT_STAGES.md).
-> Earlier long-form documentation and slides are in `docs/` (docx/pptx/pdf).
+## What it does
 
-## Architecture
+Cheap IoT devices (cameras, plugs, routers) rarely get security updates, which makes them easy targets for botnets like Mirai. This gateway watches their traffic and stacks four kinds of detection:
 
-```
-                    NIC (eth0)
-                        │
-        ┌───────────────▼────────────────┐
-Layer 1 │ XDP (xdp/obj/xdp_gateway.o)    │  blacklist drop → SYN/UDP rate-limit
-        │ runs in NIC driver, pre-skb    │  → flow tracking → whitelist bypass
-        └───────────────┬────────────────┘
-                        │ XDP_PASS
-        ┌───────────────▼────────────────┐
-Layer 2 │ Suricata 7.0.8 (af-packet)     │  signature IDS; optional eBPF bypass
-        │ + ebpf/suricata_bypass.c       │  filter for known-good flows
-        └──────┬─────────────────────────┘
-               │ alerts → /var/log/suricata/eve.json
-               │              │
-               │       scripts/suricata_watcher.py
-               │              │
-        ┌──────▼─────────────────────────┐
-Layer 3 │ scripts/detect_pipeline.py     │  scapy sniffer → per-flow 13-feature
-        │  ├─ flow_features.py           │  vectors → NPU inference
-        │  ├─ npu_detector.py            │  RKNN (NPU) → ONNX (CPU) → sklearn RF
-        │  └─ behavioral analysis        │  beaconing / long-conn / DNS anomalies
-        └──────┬─────────────────────────┘
-               │ npu_alerts.jsonl
-        ┌──────▼─────────────────────────┐
-Layer 4 │ scripts/decision_engine.py     │  evidence accumulation per device IP,
-        │                                │  60 s window, score decay 5 pts/min
-        │  score ≥ 80 → QUARANTINE       │  → nftables set (1 h timeout)
-        │  score ≥ 50 → ALERT            │  → MQTT iot-gateway/alerts
-        │  score ≥ 20 → LOG              │  → decisions.jsonl
-        └──────┬─────────────────────────┘
-               │
-        ┌──────▼─────────────────────────┐
-Layer 5 │ dashboard/app.py (Flask :5000) │  live metrics, quarantine view,
-        │ scripts/metrics_exporter.py    │  9 attack simulators; InfluxDB export
-        └────────────────────────────────┘
+1. **Kernel filtering (XDP/eBPF)**: drops blacklisted hosts and floods inside the network driver, before Linux even builds a packet.
+2. **Signature IDS (Suricata)**: 244 custom rules for IoT attacks, such as Mirai payloads, default-credential logins, firmware exploits, MQTT/CoAP/Modbus abuse and C2 traffic.
+3. **Anomaly detection on the NPU**: each network flow becomes 13 numbers. An autoencoder running on the RK3588 NPU flags flows it cannot reconstruct well.
+4. **Behavior rules**: periodic "beaconing" to a command server, long-lived hidden connections, and random-looking (DGA) DNS names.
+
+Every signal adds points to the device that caused it. If a device collects **80 points within 60 seconds**, it is quarantined with nftables for an hour and an MQTT alert is sent.
+
+## Results
+
+Stress test v8 (2026-04-02, 47 minutes, 9 attack phases from recon to DNS C2):
+
+| Metric | Value |
+|---|---|
+| Attack phases detected | 9 / 9 |
+| Expected Suricata rule IDs that fired | 87 / 88 (98.9%) |
+| Alerts raised | 1,551 |
+
+Full report: [`docs/results/stress_test_v8.md`](docs/results/stress_test_v8.md). It also lists rules that fire inconsistently across runs.
+
+## How it works
+
+```mermaid
+flowchart LR
+    NIC[NIC eth0] --> XDP[XDP / eBPF<br>blacklist, rate limit]
+    XDP --> SUR[Suricata<br>244 IoT rules]
+    XDP --> FLOW[Flow features<br>13 per flow]
+    FLOW --> NPU[Autoencoder<br>on RK3588 NPU]
+    FLOW --> BEH[Behavior rules<br>beaconing, DGA, long conn]
+    SUR --> DEC{Decision engine<br>points per device, 60 s window}
+    NPU --> DEC
+    BEH --> DEC
+    DEC -->|≥ 80| Q[nftables quarantine 1 h]
+    DEC -->|≥ 50| A[MQTT alert]
+    DEC -->|≥ 20| L[log]
 ```
 
-**Evidence scoring** (decision_engine.py): Suricata severity 1/2/3 → 50/30/10 pts;
-NPU anomaly → 40 pts (+20 if score ≥ 2× threshold); behavioral: beaconing 35,
-long connection 25, DNS anomaly 20 pts. Trusted IPs in `NEVER_QUARANTINE` are
-exempt from quarantine.
+| Signal | Points |
+|---|---|
+| Suricata severity 1 / 2 / 3 | 50 / 30 / 10 |
+| NPU anomaly (high confidence) | 40 (60) |
+| Beaconing | 35 |
+| Long-lived connection | 25 |
+| DNS anomaly | 20 |
 
-**ML models** (`models/`): a 13-feature autoencoder (threshold MSE ≈ 0.00193,
-trained on NSL-KDD; `autoencoder.rknn` INT8 for the NPU) plus a supervised
-classifier (`classifier.rknn`, softmax [normal, attack]) and a sklearn
-RandomForest (`rf_model.joblib`) as CPU fallback. `npu_detector.py` selects
-RKNN → ONNX → sklearn in that order. The ONNX→RKNN conversion is done on an
-x86 host (see the `rknn-convert` folder on the dev PC) because rknn-toolkit2
-does not run on the device; the device only needs `rknn-toolkit-lite2`.
+Inference falls back automatically: RKNN on the NPU → ONNX on the CPU → scikit-learn random forest. The gateway keeps running without the NPU.
 
-## Usage
+A Flask dashboard on port 5000 shows live alerts, device scores and quarantines. It also has buttons that launch the bundled attack simulators against a test device.
+
+## Quick start
+
+This is a hardware appliance, so it needs an Orange Pi 5 (RK3588/RK3588S) with Suricata 7 built on the device. [`INSTALL.md`](INSTALL.md) has the full setup. After that:
 
 ```bash
-./gateway.sh start     # nftables flush → XDP load → Suricata → mosquitto
-                       # → suricata_watcher → detect_pipeline → dashboard
-./gateway.sh status    # per-component status
-./gateway.sh test      # end-to-end integration test
+cp configs/gateway.env.example gateway.env   # set interface, gateway IP, test device IP
+source gateway.env
+./gateway.sh start      # XDP → Suricata → MQTT → detection pipeline → dashboard
+./gateway.sh status
+./gateway.sh test       # end-to-end check
 ./gateway.sh stop
 ```
 
-Dashboard: `http://<gateway-ip>:5000` — live alerts, per-device threat scores,
-quarantine status, and buttons to launch the attack simulators against the test
-device.
-
-XDP management:
+Useful controls:
 
 ```bash
-xdp/scripts/xdp_control.sh load|unload|stats|flows|status
-xdp/scripts/xdp_control.sh block <IP> [reason]     # NIC-level drop
-ebpf/xdp_manage.sh whitelist-ip <IP> | whitelist-port <PORT>
+xdp/scripts/xdp_control.sh block <IP>     # drop an IP in the NIC driver
+scripts/quarantine.sh list                # show quarantined devices
+scripts/quarantine.sh remove <IP>
 ```
 
-Quarantine management: `scripts/quarantine.sh add|remove|list|flush <IP>`.
+## Project structure
 
-## Repository layout
+```
+gateway.sh              start / stop / status / test for the whole stack
+xdp/src/xdp_gateway.c   XDP program: blacklist, SYN/UDP rate limit, flow tracking
+ebpf/                   Suricata-side eBPF bypass filter
+rules/                  244 custom Suricata rules in 16 files
+scripts/
+  detect_pipeline.py    packet sniffer → flow features → NPU → behavior rules
+  flow_features.py      the 13 flow features
+  npu_detector.py       RKNN → ONNX → sklearn fallback chain
+  npu_infer.c           C bridge to the RKNN runtime
+  decision_engine.py    evidence scoring and quarantine
+  attack_*.py / .sh     attack simulators: port scan, floods, ARP spoof, C2, UPnP, brute force
+models/                 trained autoencoder, classifier, random forest + training scripts
+dashboard/app.py        Flask dashboard
+configs/                Suricata, nftables, systemd and logrotate configs
+docs/                   development history, test results, slides
+```
 
-| Path | Contents |
-|---|---|
-| `gateway.sh` | Master start/stop/status/test orchestrator |
-| `scripts/` | Detection pipeline, decision engine, watchers, metrics exporter, MQTT alerter, attack simulators (`attack_*.py/sh`), utilities (`quarantine.sh`, `pin_cores.sh`), model training (`train_autoencoder.py`, `train_random_forest.py`, `convert_to_rknn.py`), native NPU bridge (`npu_infer.c` → `libnpu_infer.so`) |
-| `dashboard/` | Flask web UI (`app.py`, port 5000) |
-| `xdp/` | XDP programs: `src/xdp_gateway.c` (production: blacklist → rate-limit → flow-track → whitelist), `xdp_blacklist.c`, `xdp_hello.c`; compiled objects in `obj/`; `scripts/xdp_control.sh` |
-| `ebpf/` | Suricata-side eBPF: `suricata_bypass.c` (flow bypass filter), `xdp_filter.c`, `build_ebpf.sh` (installs to `/etc/suricata/ebpf/`) |
-| `models/` | Trained models + configs (see above); `models.bak_20260309/` is a dated backup |
-| `captures/` | `baseline_normal.pcap`, `test_full_suite.pcap` for offline replay |
-| `logs/` | Runtime output: `npu_alerts.jsonl`, `decisions.jsonl`, component logs |
-| `pids/` | PID files written by `gateway.sh` |
-| `configs/` | Reference copies of the live system configs: `suricata-iot.yaml`, `nftables-iot.conf`, `iot-gateway.service`, `metrics-exporter.service`, `logrotate_suricata.conf` (authoritative versions live in `/etc` — see below) |
-| `rules/` | Reference copies of the 16 **custom IoT Suricata rule files** loaded by `suricata-iot.yaml`: iot-attacks, mirai-variants, firmware-exploits, protocol-abuse, c2-indicators, dns-lateral, network-anomaly, evasion-techniques, tls-fingerprints, iot-advanced, ics-modbus, mqtt-deep, device-fingerprints, coap-deep, anomaly-baseline, local (authoritative: `/etc/suricata/rules/`) |
-| `docs/` | This project's documentation, slides, and development-stage history |
+## Limitations
 
-## External dependencies (not in this repo)
+- **Lab use only.** The dashboard has no login and can start attack scripts with sudo. Keep it on an isolated test network.
+- The models were trained on NSL-KDD and synthetic flows (`scripts/generate_dataset.py`), not traffic from a real home network. Accuracy after INT8 quantization has not been validated separately.
+- The autoencoder is tiny (13 → 8 → 4 → 8 → 13), so it barely loads the NPU. The NPU path exists to show the full pipeline, not because the CPU couldn't keep up.
+- The Suricata eBPF bypass is built but disabled; enabling it needs Suricata rebuilt with `--enable-ebpf`.
+- [`docs/DEVELOPMENT_STAGES.md`](docs/DEVELOPMENT_STAGES.md) tracks the open items.
 
-These live on the system, outside the project directory (reference copies are kept in
-`configs/` and `rules/`; all were verified present on the device):
+## License
 
-- `/etc/suricata/suricata-iot.yaml` — Suricata config (af-packet; HOME_NET
-  192.168.0.0/20 + 10.0.0.0/24; HTTP/TLS/DNS/MQTT app layers; `midstream: true`
-  and `exception-policy: pass-packet` tuned so XMAS/FIN/NULL scan evasion rules
-  fire; eve.json written to `iot-gateway/logs/eve.json`, fast/stats to
-  `~/suricata/`). Note: the yaml does **not** enable the eBPF bypass.
-- `/etc/suricata/rules/` — the 16 custom rule files (mirrored in `rules/`)
-- `/etc/suricata/ebpf/` — installed eBPF bypass objects (`ebpf/build_ebpf.sh`)
-- `/etc/nftables-iot.conf` + nftables set `inet iot_gateway quarantine_v4`
-- `/etc/systemd/system/iot-gateway.service` (runs `gateway.sh`; ordered after
-  mosquitto, influxdb, grafana-server) and `metrics-exporter.service`
-- `~/logrotate_suricata.conf` — caps eve.json at 50 MB (stats.log once grew to 7.8 GB)
-- Built from source in `~`: `suricata-7.0.8/`, `libbpf/`, `xdp-tools/`,
-  `rknn-toolkit2/`, and `kernel-build/` (kernel + r8125 NIC driver rebuild for
-  XDP support; original module backed up as `~/r8125.ko.backup`)
-- `~/npu_stress_test.py` — standalone NPU load/throughput test
-
-## Network assumptions (current test setup)
-
-| Item | Value |
-|---|---|
-| Monitored interface | `eth0` (bridge `br0` was trialed; see stages doc) |
-| Gateway | `192.168.13.1` (LAN side), `192.168.3.64/20` (uplink) |
-| Test IoT device | `192.168.13.48` |
-| Never-quarantine | router `192.168.3.1`, workstation `192.168.3.15` |
-| Dashboard / MQTT / InfluxDB | :5000 / localhost:1883 / localhost:8086 |
-
-## Known gaps
-
-The project was paused mid-integration; the honest state is ~80 %:
-
-- **Watcher path** — *fixed*: `scripts/suricata_watcher.py` now reads eve.json
-  from `iot-gateway/logs/eve.json` (matching `suricata-iot.yaml`) instead of
-  `/var/log/suricata/eve.json`, so Suricata alerts now reach the decision engine.
-  Overridable with the `EVE_LOG` env var.
-- `setup_bridge.sh` referenced by `gateway.sh:31` is intentionally kept but not
-  yet written; the eth0-vs-br0 capture strategy is a resume item (see stages doc).
-- **eBPF bypass cannot be enabled as-is**: the objects are built and installed to
-  `/etc/suricata/ebpf/`, but the running Suricata was configured with only
-  `--enable-nfqueue --enable-nflog`, **not `--enable-ebpf`**. Adding
-  `ebpf-filter-file`/`bypass` to the yaml would make Suricata fatally fail at
-  startup. Activating the bypass requires rebuilding Suricata first — tracked as a
-  resume stage. The yaml is deliberately left without the bypass keys.
-- `metrics_exporter.py` → InfluxDB works but has a hardcoded token; no Grafana.
-- Dashboard has no authentication (test-bench only).
-- Models trained on NSL-KDD only; no post-quantization accuracy validation.
-- Logs under `logs/` grew to ~2.3 GB — safe to truncate.
-
-Full detail per stage in [`docs/DEVELOPMENT_STAGES.md`](docs/DEVELOPMENT_STAGES.md).
+MIT, see [`LICENSE`](LICENSE).
